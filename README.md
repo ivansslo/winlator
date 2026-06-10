@@ -20,6 +20,10 @@ Winlator is an Android application that lets you to run Windows (x86_64) applica
 
 ----
 
+# Device Profiles
+
+- **Low-end Mali GPU (e.g. Oppo F9 / F9 Pro — CPH1823, Mali-G72):** see [`docs/CPH1823-Mali-G72.md`](docs/CPH1823-Mali-G72.md) for recommended settings. Note: Mali GPUs cannot use the Turnip driver; use VirGL + WineD3D and expect 2D / older games only.
+
 # Useful Tips
 
 - If you are experiencing performance issues, try changing the Box64 preset to `Performance` in Container Settings -> Advanced Tab.

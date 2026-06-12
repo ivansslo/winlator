@@ -1,4 +1,4 @@
-name: Build Winlator (Repair & Auto-Release)
+name: Build Winlator (Robust Repair)
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
       version_tag:
         description: 'Version Tag (contoh: v1.0-cph1823)'
         required: true
-        default: 'test-build'
+        default: 'fix-build'
       build_type:
         description: 'Build Type'
         required: true
@@ -20,7 +20,6 @@ on:
 
 permissions:
   contents: write
-  actions: read
 
 env:
   JAVA_VERSION: '17'
@@ -33,7 +32,7 @@ jobs:
   build:
     name: Build APK
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
 
     steps:
       # ============================================
@@ -50,233 +49,138 @@ jobs:
           echo "=== Disk space before cleanup ==="
           df -h
           sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /usr/local/lib/android/sdk/ndk
           sudo rm -rf /opt/ghc
-          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /usr/local/lib/android/sdk/ndk*
+          sudo rm -rf /opt/hostedtoolcache
           sudo docker image prune --all --force || true
           echo "=== Disk space after cleanup ==="
           df -h
 
-      - name: ☕ Setup Java JDK ${{ env.JAVA_VERSION }}
+      - name: ☕ Setup Java JDK
         uses: actions/setup-java@v4
         with:
           java-version: ${{ env.JAVA_VERSION }}
           distribution: 'temurin'
-          cache: 'gradle'
 
+      # ============================================
+      # STEP 2: Setup Gradle & Wrapper
+      # ============================================
+      - name: 🛠️ Setup Gradle CLI
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: ${{ env.GRADLE_VERSION }}
+          cache-disabled: false
+
+      - name: 📦 Ensure Gradle Wrapper exists
+        run: |
+          echo "=== Checking Gradle Wrapper ==="
+          if [ ! -f "./gradlew" ] || [ ! -f "gradle/wrapper/gradle-wrapper.jar" ]; then
+            echo "❌ Wrapper missing, generating new one..."
+            gradle wrapper --gradle-version ${{ env.GRADLE_VERSION }}
+          else
+            echo "✅ Wrapper already exists"
+          fi
+          
+          echo "=== Fixing permissions and line endings ==="
+          sed -i 's/\r$//' ./gradlew
+          chmod +x ./gradlew
+          
+          echo "=== Verifying wrapper files ==="
+          ls -la gradlew
+          ls -la gradle/wrapper/
+
+      # ============================================
+      # STEP 3: Setup Android SDK & NDK
+      # ============================================
       - name: 🤖 Setup Android SDK
         uses: android-actions/setup-android@v3
-        with:
-          packages: 'platform-tools platforms;android-${{ env.ANDROID_COMPILE_SDK }} build-tools;${{ env.ANDROID_BUILD_TOOLS }}'
 
-      # ============================================
-      # STEP 2: Install NDK & Dependencies
-      # ============================================
       - name: 📦 Install Android NDK
         run: |
           echo "Installing NDK ${{ env.ANDROID_NDK_VERSION }}..."
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1
           $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "ndk;${{ env.ANDROID_NDK_VERSION }}"
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${{ env.ANDROID_NDK_VERSION }}" >> $GITHUB_ENV
           echo "NDK_HOME=$ANDROID_HOME/ndk/${{ env.ANDROID_NDK_VERSION }}" >> $GITHUB_ENV
 
-      - name: 🔧 Install Build Dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            cmake \
-            ninja-build \
-            python3 \
-            python3-pip \
-            unzip \
-            wget \
-            curl \
-            git \
-            zip
-
       # ============================================
-      # STEP 3: Perbaikan File yang Sering Error
+      # STEP 4: Patch Konfigurasi
       # ============================================
-      - name: 🛠️ Fix Common Issues
+      - name: 📝 Patch gradle.properties
         run: |
-          echo "=== Fixing gradle wrapper permissions ==="
-          chmod +x ./gradlew || echo "gradlew not found, will be created"
-          
-          echo "=== Checking gradle wrapper ==="
-          if [ ! -f "./gradlew" ]; then
-            echo "❌ gradlew missing, generating new wrapper..."
-            gradle wrapper --gradle-version ${{ env.GRADLE_VERSION }} || true
-          fi
-          
-          echo "=== Fixing line endings (CRLF -> LF) ==="
-          if [ -f "./gradlew" ]; then
-            sed -i 's/\r$//' ./gradlew
-          fi
-          
-          echo "=== Verify gradle wrapper ==="
-          ls -la gradle/wrapper/ || echo "Wrapper directory missing"
-
-      - name: 📝 Patch gradle.properties (Memory Fix)
-        run: |
-          echo "=== Adding memory configuration ==="
-          cat >> gradle.properties << EOF
-          
-          # Performance & Memory Fixes
-          org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=1024m -XX:+HeapDumpOnOutOfMemoryError -Dfile.encoding=UTF-8
-          org.gradle.parallel=true
-          org.gradle.caching=true
-          org.gradle.daemon=false
-          org.gradle.configureondemand=false
-          
-          # AndroidX
-          android.useAndroidX=true
-          android.enableJetifier=true
-          
-          # Suppress warnings
-          android.suppressUnsupportedCompileSdk=34
-          android.nonTransitiveRClass=false
-          android.nonFinalResIds=false
-          EOF
+          echo "=== Updating gradle.properties ==="
+          {
+            echo ""
+            echo "# Performance & Memory Fixes"
+            echo "org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1024m -XX:+HeapDumpOnOutOfMemoryError -Dfile.encoding=UTF-8"
+            echo "org.gradle.parallel=true"
+            echo "org.gradle.caching=true"
+            echo "org.gradle.daemon=false"
+            echo ""
+            echo "# AndroidX"
+            echo "android.useAndroidX=true"
+            echo "android.enableJetifier=true"
+            echo ""
+            echo "# Suppress warnings"
+            echo "android.nonTransitiveRClass=false"
+            echo "android.nonFinalResIds=false"
+          } >> gradle.properties
           
           echo "=== Current gradle.properties ==="
           cat gradle.properties
 
-      - name: 🔍 Verify Project Structure
+      # ============================================
+      # STEP 5: Build APK
+      # ============================================
+      - name: 🏗️ Build APK
         run: |
-          echo "=== Repository structure ==="
-          ls -la
-          echo ""
-          echo "=== App directory ==="
-          ls -la app/ || echo "❌ app directory not found"
-          echo ""
-          echo "=== Build files ==="
-          find . -maxdepth 3 -name "build.gradle*" -type f
-          echo ""
-          echo "=== Submodules status ==="
-          git submodule status || echo "No submodules"
+          echo "=== Starting ${{ github.event.inputs.build_type || 'debug' }} build ==="
+          if [ "${{ github.event.inputs.build_type }}" = "release" ]; then
+            ./gradlew assembleRelease --no-daemon --stacktrace --warning-mode all
+          else
+            ./gradlew assembleDebug --no-daemon --stacktrace --warning-mode all
+          fi
 
       # ============================================
-      # STEP 4: Build APK dengan Error Handling
+      # STEP 6: Verifikasi & Rilis
       # ============================================
-      - name: 🏗️ Build Debug APK
-        if: ${{ github.event.inputs.build_type == 'debug' || github.event.inputs.build_type == '' }}
-        run: |
-          echo "=== Starting Debug Build ==="
-          ./gradlew assembleDebug \
-            --no-daemon \
-            --stacktrace \
-            --warning-mode all \
-            -Pandroid.useAndroidX=true \
-            -Pandroid.enableJetifier=true \
-          || {
-            echo "❌ First build attempt failed, trying with --info flag..."
-            ./gradlew assembleDebug --no-daemon --info --stacktrace
-          }
-
-      - name: 🏗️ Build Release APK
-        if: ${{ github.event.inputs.build_type == 'release' }}
-        run: |
-          echo "=== Starting Release Build ==="
-          ./gradlew assembleRelease \
-            --no-daemon \
-            --stacktrace \
-            --warning-mode all \
-          || {
-            echo "❌ Release build failed, falling back to debug..."
-            ./gradlew assembleDebug --no-daemon --stacktrace
-          }
-
-      # ============================================
-      # STEP 5: Verifikasi & Upload Artifact
-      # ============================================
-      - name: 🔎 Locate APK Files
+      - name: 🔎 Find APK Files
         id: find_apk
         run: |
           echo "=== Searching for APK files ==="
-          APK_PATH=$(find . -name "*.apk" -type f | head -n 1)
-          
-          if [ -z "$APK_PATH" ]; then
-            echo "❌ No APK file found!"
-            echo "=== Build outputs directory ==="
-            find . -path "*/build/outputs*" -type d 2>/dev/null || true
+          APK_FILES=$(find . -name "*.apk" -type f)
+          if [ -z "$APK_FILES" ]; then
+            echo "❌ No APK files found!"
             exit 1
           fi
-          
-          echo "✅ APK found: $APK_PATH"
-          echo "apk_path=$APK_PATH" >> $GITHUB_OUTPUT
-          
-          # Rename APK
-          APK_DIR=$(dirname "$APK_PATH")
-          NEW_NAME="Winlator-${{ github.event.inputs.version_tag || 'auto' }}-${{ github.run_number }}.apk"
-          cp "$APK_PATH" "$APK_DIR/$NEW_NAME"
-          echo "renamed_apk=$APK_DIR/$NEW_NAME" >> $GITHUB_OUTPUT
-          
-          echo "=== APK Info ==="
-          ls -lh "$APK_DIR/$NEW_NAME"
+          echo "✅ Found APK files:"
+          echo "$APK_FILES"
+          echo "apk_files<<EOF" >> $GITHUB_OUTPUT
+          echo "$APK_FILES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
-      - name: 📤 Upload APK Artifact
+      - name: 📤 Upload Artifact
         uses: actions/upload-artifact@v4
-        if: success()
         with:
           name: winlator-apk-${{ github.run_number }}
-          path: |
-            **/build/outputs/apk/**/*.apk
+          path: "**/*.apk"
           retention-days: 14
 
-      # ============================================
-      # STEP 6: Buat Pre-Release Otomatis
-      # ============================================
       - name: 🚀 Create Pre-Release
-        if: ${{ success() && github.event_name == 'workflow_dispatch' }}
+        if: success() && github.event_name == 'workflow_dispatch'
         uses: ncipollo/release-action@v1
         with:
-          artifacts: "**/build/outputs/apk/**/*.apk"
+          artifacts: "**/*.apk"
           tag: "${{ github.event.inputs.version_tag }}-${{ github.run_number }}"
           name: "🧪 Test Build - ${{ github.event.inputs.version_tag }}"
           body: |
-            ## 📱 Winlator Test Build
+            ## Winlator Test Build
             
-            **Build Information:**
-            - 🏷️ Version: `${{ github.event.inputs.version_tag }}`
-            - 🔢 Build Number: `#${{ github.run_number }}`
-            - 📦 Build Type: `${{ github.event.inputs.build_type }}`
-            - 📅 Build Date: `${{ github.event.repository.updated_at }}`
-            - 🌿 Branch: `${{ github.ref_name }}`
-            - 💾 Commit: `${{ github.sha }}`
+            - **Version:** ${{ github.event.inputs.version_tag }}
+            - **Build Number:** #${{ github.run_number }}
+            - **Type:** ${{ github.event.inputs.build_type }}
+            - **Target:** arm64-v8a (CPH1823 compatible)
             
-            **Target Device:**
-            - 📱 Compatible with arm64-v8a devices
-            - 🎯 Tested target: CPH1823 (Oppo F9)
-            
-            ⚠️ **Catatan:** Ini adalah build pengujian dan mungkin tidak stabil.
+            ⚠️ Build ini adalah versi pengujian.
           prerelease: true
-          allowUpdates: true
           token: ${{ secrets.GITHUB_TOKEN }}
-
-      # ============================================
-      # STEP 7: Debug Info (jika gagal)
-      # ============================================
-      - name: 🐛 Upload Build Logs (on failure)
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-logs-${{ github.run_number }}
-          path: |
-            **/build/reports/**
-            **/build/outputs/logs/**
-            ~/.gradle/daemon/**/daemon-*.out.log
-          retention-days: 7
-
-      - name: 📊 Build Summary
-        if: always()
-        run: |
-          echo "## 📋 Build Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Item | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Status | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Build Number | #${{ github.run_number }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Java Version | ${{ env.JAVA_VERSION }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| NDK Version | ${{ env.ANDROID_NDK_VERSION }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Compile SDK | ${{ env.ANDROID_COMPILE_SDK }} |" >> $GITHUB_STEP_SUMMARY

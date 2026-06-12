@@ -160,8 +160,8 @@ jobs:
       # STEP 4: Build APK dengan Error Handling
       # ============================================
 
-- name: 🛠️ Fix Common Issues
-  run: |
+      - name: 🛠️ Fix Common Issues
+        run: |
     echo "=== Fixing gradle wrapper permissions ==="
     chmod +x ./gradlew
     

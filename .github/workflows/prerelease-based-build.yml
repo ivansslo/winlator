@@ -159,18 +159,6 @@ jobs:
       # ============================================
       # STEP 4: Build APK dengan Error Handling
       # ============================================
-
-      - name: 🛠️ Fix Common Issues
-        run: |
-    echo "=== Fixing gradle wrapper permissions ==="
-    chmod +x ./gradlew
-    
-    echo "=== Fixing line endings (CRLF -> LF) ==="
-    sed -i 's/\r$//' ./gradlew
-    
-    echo "=== Verify gradle wrapper ==="
-    ls -la gradle/wrapper/
-      
       - name: 🏗️ Build Debug APK
         if: ${{ github.event.inputs.build_type == 'debug' || github.event.inputs.build_type == '' }}
         run: |

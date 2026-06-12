@@ -44,7 +44,7 @@ jobs:
           $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "ndk;${{ env.ANDROID_NDK_VERSION }}"
           
       - name: Make Gradle Executable
-        run: chmod +x ./gradlew
+        run: chmod +x app/gradlew scripts/*.sh
 
       - name: Build Debug APK (Auto-signed)
         env:

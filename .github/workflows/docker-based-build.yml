@@ -1,69 +1,74 @@
-name: Build Winlator (Docker)
+name: Build & Pre-Release for CPH1823 (Oppo F9)
 
 on:
-  push:
-    branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
+  # Memungkinkan Anda men-trigger build ini secara manual dari tab Actions
+  workflow_dispatch:
+    inputs:
+      version_tag:
+        description: 'Tag Version (contoh: v1.0.1-cph1823)'
+        required: true
+        default: 'cph1823-test'
+
+# Memberikan izin pada GitHub Actions untuk membuat Release
+permissions:
+  contents: write
+
+env:
+  JAVA_VERSION: '17'
+  ANDROID_NDK_VERSION: '26.1.10909125' # Versi NDK standar untuk Winlator modern
 
 jobs:
-  docker-build:
-    name: Build with Docker
+  build-and-release:
+    name: Build & Publish Pre-Release
     runs-on: ubuntu-latest
     
-    container:
-      image: ubuntu:22.04
-      
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          submodules: recursive
-          
-      - name: Install build dependencies
-        run: |
-          apt-get update && apt-get install -y \
-            build-essential \
-            wget \
-            unzip \
-            openjdk-17-jdk \
-            python3 \
-            python3-pip \
-            cmake \
-            ninja-build \
-            git
-            
-      - name: Setup Java
-        run: |
-          export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
-          echo "JAVA_HOME=$JAVA_HOME" >> $GITHUB_ENV
-          
-      - name: Download Android SDK
-        run: |
-          mkdir -p $HOME/android-sdk/cmdline-tools
-          cd $HOME/android-sdk/cmdline-tools
-          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
-          unzip -q commandlinetools-linux-11076708_latest.zip
-          mv cmdline-tools latest
-          
-      - name: Install Android SDK components
-        run: |
-          export ANDROID_HOME=$HOME/android-sdk
-          export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin
-          yes | sdkmanager --licenses > /dev/null 2>&1
-          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0" "ndk;26b"
-          
-      - name: Build with Docker
-        env:
-          ANDROID_HOME: $HOME/android-sdk
-          ANDROID_NDK_HOME: $HOME/android-sdk/ndk/26b
-        run: |
-          # Build script sesuai dengan kebutuhan Winlator
-          chmod +x ./gradlew
-          ./gradlew assembleDebug --no-daemon
-          
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+          submodules: recursive # Penting untuk mengambil Turnip, Box86/64 dll
+
+      - name: Setup Java JDK
+        uses: actions/setup-java@v4
         with:
-          name: winlator-apk
-          path: app/build/outputs/apk/debug/*.apk
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+          cache: 'gradle'
+
+      - name: Setup Android SDK & NDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Specific NDK
+        run: |
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "ndk;${{ env.ANDROID_NDK_VERSION }}"
+          
+      - name: Make Gradle Executable
+        run: chmod +x ./gradlew
+
+      - name: Build Debug APK (Auto-signed)
+        env:
+          ANDROID_HOME: ${{ env.ANDROID_HOME }}
+          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/${{ env.ANDROID_NDK_VERSION }}
+        # Kita menggunakan assembleDebug agar APK otomatis ter-sign dan bisa langsung diinstal di HP
+        run: ./gradlew assembleDebug --no-daemon -Pandroid.useAndroidX=true -Pandroid.enableJetifier=true
+
+      - name: Rename APK for CPH1823
+        run: |
+          mv app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/Winlator-${{ github.event.inputs.version_tag }}-CPH1823.apk
+
+      - name: Create GitHub Pre-Release
+        uses: ncipollo/release-action@v1
+        with:
+          artifacts: "app/build/outputs/apk/debug/*.apk"
+          tag: "${{ github.event.inputs.version_tag }}-${{ github.run_number }}"
+          name: "Test Build CPH1823 - ${{ github.event.inputs.version_tag }}"
+          body: |
+            ## 📱 Experimental Build for CPH1823 (Oppo F9)
+            - **Target Architecture:** `arm64-v8a`
+            - **Status:** Pre-release / Test Build
+            - **Run Number:** #${{ github.run_number }}
+            
+            *Catatan: Build ini menggunakan debug-key sehingga dapat langsung diinstal (timpa/update) jika sebelumnya menginstal dari sumber yang sama, namun mungkin perlu uninstall versi official terlebih dahulu.*
+          prerelease: true
+          token: ${{ secrets.GITHUB_TOKEN }}

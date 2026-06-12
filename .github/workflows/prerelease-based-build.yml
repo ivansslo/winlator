@@ -70,8 +70,10 @@ jobs:
         with:
           gradle-version: ${{ env.GRADLE_VERSION }}
           cache-disabled: false
+          build-root-directory: app # 👈 Direct setup-gradle to the app submodule
 
       - name: 📦 Ensure Gradle Wrapper exists
+        working-directory: app # 👈 Run from the app subdirectory
         run: |
           echo "=== Checking Gradle Wrapper ==="
           if [ ! -f "./gradlew" ] || [ ! -f "gradle/wrapper/gradle-wrapper.jar" ]; then
@@ -107,6 +109,7 @@ jobs:
       # STEP 4: Patch Konfigurasi
       # ============================================
       - name: 📝 Patch gradle.properties
+        working-directory: app # 👈 Run from the app subdirectory so we patch the correct gradle.properties
         run: |
           echo "=== Updating gradle.properties ==="
           {
@@ -133,6 +136,7 @@ jobs:
       # STEP 5: Build APK
       # ============================================
       - name: 🏗️ Build APK
+        working-directory: app # 👈 Run from the app subdirectory
         run: |
           echo "=== Starting ${{ github.event.inputs.build_type || 'debug' }} build ==="
           if [ "${{ github.event.inputs.build_type }}" = "release" ]; then
